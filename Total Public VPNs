@@ -1,0 +1,21 @@
+SELECT
+  account_alias,
+  COUNT(DISTINCT resource_id) AS total_active_vpns
+FROM
+  cloud_resources_v
+WHERE
+  (
+    service ILIKE '%vpn%'
+    OR resource_type ILIKE '%vpn%'
+    OR resource_type ILIKE '%direct-connect%'
+  )
+  AND start_time > DATEADD (HOUR, -4, CURRENT_DATE)
+  AND COALESCE(
+    GET_PATH (
+      PARSE_JSON (resource_config),
+      'VgwTelemetry[0].Status'
+    ),
+    GET_PATH (PARSE_JSON (resource_config), 'Status')
+  ) ILIKE '%UP%'
+GROUP BY
+  account_alias;
