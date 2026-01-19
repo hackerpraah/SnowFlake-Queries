@@ -1,0 +1,33 @@
+SELECT
+  DISTINCT csp,
+  CAST(GET_PATH (CLOUD_DETAILS, 'accountAlias') AS TEXT) AS account_name,
+  resource_type,
+  resource_id,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'InstanceType') AS TEXT
+  ) AS instance_type,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'PublicIpAddress') AS TEXT
+  ) AS public_ip,
+  resource_region,
+  CAST(GET_PATH (status, 'credentialStatus') AS TEXT) AS credential_status
+FROM
+  cloud_configuration_v
+WHERE
+  resource_type ILIKE '%ec2:instance%'
+  AND CAST(GET_PATH (status, 'credentialStatus') AS TEXT) ILIKE '%expired%'
+  AND NOT GET_PATH (RESOURCE_CONFIG, 'PublicIpAddress') IS NULL
+  AND EXISTS (
+    SELECT
+      1
+    FROM
+      LATERAL FLATTEN (
+        input => GET_PATH (RESOURCE_CONFIG, 'SecurityGroups')
+      ) AS sg (SEQ, KEY, PATH, INDEX, VALUE, THIS)
+    WHERE
+      GET_PATH (sg.value, 'FromPort') <= 80
+      AND GET_PATH (sg.value, 'ToPort') >= 80
+      AND GET_PATH (sg.value, 'IpRanges') LIKE '%0.0.0.0/0%'
+  )
+  AND start_time > DATEADD (DAY, -7, CURRENT_TIMESTAMP())
+  AND end_time IS NULL;
