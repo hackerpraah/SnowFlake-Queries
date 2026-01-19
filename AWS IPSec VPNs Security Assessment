@@ -1,0 +1,48 @@
+SELECT
+  DISTINCT csp,
+  CAST(GET_PATH (cloud_details, 'accountAlias') AS TEXT) AS aws_env,
+  CAST(GET_PATH (cloud_details, 'accountID') AS TEXT) AS aws_acc_id,
+  resource_type,
+  resource_id,
+  resource_region,
+  CAST(GET_PATH (Tunnels.value, 'IkeVersions') AS TEXT) AS ike_version,
+  CAST(
+    GET_PATH (Tunnels.value, 'Phase1EncryptionAlgorithms') AS TEXT
+  ) AS phase1_encryption,
+  CAST(
+    GET_PATH (Tunnels.value, 'Phase1IntegrityAlgorithms') AS TEXT
+  ) AS phase1_integrity,
+  CAST(
+    GET_PATH (Tunnels.value, 'Phase2EncryptionAlgorithms') AS TEXT
+  ) AS phase2_encryption,
+  CAST(
+    GET_PATH (Tunnels.value, 'Phase2IntegrityAlgorithms') AS TEXT
+  ) AS phase2_integrity,
+ 
+  CAST(
+    GET_PATH (resource_config, 'VgwTelemetry[0].Status') AS TEXT
+  ) AS tunnel1_status,
+  CAST(
+    GET_PATH (resource_config, 'VgwTelemetry[1].Status') AS TEXT
+  ) AS tunnel2_status,
+  CAST(GET_PATH (resource_config, 'State') AS TEXT) AS gateway_state,
+  CAST(GET_PATH (resource_config, 'Type') AS TEXT) AS gateway_type,
+ 
+FROM
+  cloud_configuration_v,
+  LATERAL FLATTEN (
+    GET_PATH (resource_config, 'Options.TunnelOptions')
+  ) AS Tunnels (SEQ, KEY, PATH, INDEX, VALUE, THIS)
+WHERE
+  (
+    resource_type ILIKE '%vpn-connection%'
+  )
+  AND start_time > DATEADD (HOUR, -24, CURRENT_TIMESTAMP())
+  AND NOT (
+    GET_PATH (resource_config, 'VgwTelemetry[0].Status') ILIKE '%DOWN%'
+    AND GET_PATH (resource_config, 'VgwTelemetry[1].Status') ILIKE '%DOWN%'
+  )
+ORDER BY
+  aws_env,
+  resource_type,
+  resource_id;
