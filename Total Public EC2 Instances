@@ -1,0 +1,26 @@
+SELECT
+  CSP,
+  CAST(GET_PATH (CLOUD_DETAILS, 'accountName') AS TEXT) AS "Account Name",
+  CAST(GET_PATH (CLOUD_DETAILS, 'accountAlias') AS TEXT) AS "Account Alias",
+  
+  COUNT(RESOURCE_ID) AS "Public Instance Count"
+FROM
+  CLOUD_CONFIGURATION_V
+WHERE
+  RESOURCE_TYPE ILIKE '%ec2:instance%'
+  AND (
+    GET_PATH (RESOURCE_CONFIG, 'State.Name') = 'running'
+  )
+  AND (
+    NOT GET_PATH (RESOURCE_CONFIG, 'PublicIpAddress') IS NULL
+    //OR NOT GET_PATH (RESOURCE_CONFIG, 'PublicDnsName') IS NULL
+  )
+  AND START_TIME > DATEADD (HOUR, -24, CURRENT_TIMESTAMP())
+GROUP BY
+  CSP,
+  "Account Name",
+  "Account Alias"
+
+ORDER BY
+  CSP,
+  "Public Instance Count" DESC;
