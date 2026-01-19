@@ -1,0 +1,15 @@
+Select DISTINCT 
+CSP, CLOUD_DETAILS:accountAlias::String as AWS_ENV, CLOUD_DETAILS:accountID::String as AWS_ACC_ID, RESOURCE_ID, RESOURCE_CONFIG:DistributionConfig.DefaultCacheBehavior:ViewerProtocolPolicy::String as DefaultCacheBehavior_ViewerProtocol,
+RESOURCE_CONFIG:DistributionConfig.ViewerCertificate:MinimumProtocolVersion::String,
+RESOURCE_CONFIG:DistributionConfig.Aliases:Items,
+
+
+from CLOUD_CONFIGURATION_V,
+where
+
+RESOURCE_TYPE ILIKE '%cloudfront%' and
+API_KEY = 'get-distribution-config' and
+//RESOURCE_CONFIG:DistributionConfig.DefaultCacheBehavior:ViewerProtocolPolicy = 'allow-all' and
+not RESOURCE_CONFIG:DistributionConfig.ViewerCertificate:MinimumProtocolVersion ilike any ('TLSv1.2_2021', 'TLSv1.2_2025') and
+"START_TIME" > dateadd(hour, -24, current_date())
+ORDER BY AWS_ENV, RESOURCE_ID
