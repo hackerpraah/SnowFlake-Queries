@@ -1,0 +1,32 @@
+WITH lb_ports AS (
+  SELECT
+    DISTINCT cr.account_alias,
+    cc.resource_id,
+    cc.resource_type,
+    //cc.resource_region,
+    CAST(
+      GET_PATH (PARSE_JSON (cc.resource_config), 'Scheme') AS TEXT
+    ) AS lb_exposure
+  FROM
+    cloud_configuration_v AS cc
+    LEFT JOIN cloud_resources_v AS cr ON cc.resource_id = cr.resource_id
+  WHERE
+    LOWER(cc.resource_type) ILIKE ANY ('%elb%', '%load%')
+    AND cc.start_time > DATEADD (HOUR, -4, CURRENT_DATE)
+    AND LOWER(cc.csp) ILIKE '%aws%'
+    AND NOT cc.resource_config IS NULL
+)
+SELECT
+  account_alias,
+  //resource_region,
+  COUNT(DISTINCT resource_id) AS total_public_lbs
+FROM
+  lb_ports
+WHERE
+  LOWER(lb_exposure) ILIKE '%internet-facing%'
+GROUP BY
+  account_alias
+  //resource_region
+ORDER BY
+  account_alias;
+  //resource_region;
