@@ -1,0 +1,20 @@
+Select DISTINCT 
+CSP, CLOUD_DETAILS:accountAlias::String as AWS_ENV, CLOUD_DETAILS:accountID::String as AWS_ACC_ID, RESOURCE_ID, 
+//AliasesItems.value::String as CDN_Alias, 
+OriginItems.value:DomainName::String as OriginDomainName, 
+OriginItems.value:S3OriginConfig.OriginAccessIdentity::String as OAI,
+OriginItems.value:OriginAccessControlId::String as OAC,
+//OriginItems.value:CustomOriginConfig.OriginSslProtocols.Items as SSL_PROTOCOLS, 
+//RESOURCE_CONFIG, 
+//OriginItems.value
+from CLOUD_CONFIGURATION_V,
+LATERAL FLATTEN(RESOURCE_CONFIG:DistributionConfig.Origins:"Items") OriginItems,
+//LATERAL FLATTEN(RESOURCE_CONFIG:DistributionConfig.Aliases:"Items") AliasesItems
+where
+RESOURCE_TYPE ILIKE '%cloudfront%' and
+API_KEY = 'get-distribution-config' and
+OriginItems.value:OriginAccessControlId = '' and
+OriginItems.value:S3OriginConfig.OriginAccessIdentity = '' and
+//ARRAY_CONTAINS (CAST('TLSv1.1' AS VARIANT), Items.value) and
+"START_TIME" > dateadd(hour, -24, current_date())
+ORDER BY AWS_ENV, RESOURCE_ID
