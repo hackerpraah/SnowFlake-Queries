@@ -1,0 +1,59 @@
+SELECT
+  DISTINCT ACCOUNT_ID,
+  ACCOUNT_ALIAS,
+  RESOURCE_TYPE,
+  RESOURCE_REGION,
+  RESOURCE_ID,
+  CAST(GET_PATH (RESOURCE_CONFIG, 'DBName') AS TEXT) AS DatabaseName,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'DBInstanceIdentifier') AS TEXT
+  ) AS DBInstanceIdentifier,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'DBClusterIdentifier') AS TEXT
+  ) AS ClusterIdentifier,
+  CAST(GET_PATH (RESOURCE_CONFIG, 'Engine') AS TEXT) AS Engine,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'EngineVersion') AS TEXT
+  ) AS EngineVersion,
+  CAST(GET_PATH (RESOURCE_CONFIG, 'Status') AS TEXT) AS Status,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'AllocatedStorage') AS TEXT
+  ) AS AllocatedStorage,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'AvailabilityZones[0]') AS TEXT
+  ) AS AvailabilityZone,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'DBSubnetGroup') AS TEXT
+  ) AS DBSubnetGroup,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'DBSubnetGroup.VpcId') AS TEXT
+  ) AS VpcId,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'StorageEncrypted') AS BOOLEAN
+  ) AS IsEncrypted,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'BackupRetentionPeriod') AS TEXT
+  ) AS BackupRetentionDays,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'PubliclyAccessible') AS BOOLEAN
+  ) AS IsPubliclyAccessible,
+  CAST(
+    GET_PATH (
+      RESOURCE_CONFIG,
+      'IAMDatabaseAuthenticationEnabled'
+    ) AS BOOLEAN
+  ) AS IsIAMAuthEnabled,
+  RESOURCE_TAGS
+FROM
+  LW_CORPORATE.DATA_SHARE.CLOUD_RESOURCES_V
+WHERE
+  RESOURCE_TYPE ILIKE ANY ('rds:db-parameter-group',
+    'rds:db',    
+    'elasticache:replication-group',
+    'elasticache:cache-cluster'
+    )
+  AND NOT RESOURCE_ID IS NULL
+  AND START_TIME > DATEADD (HOUR, -24, CURRENT_DATE)
+ORDER BY
+  RESOURCE_TYPE,
+  RESOURCE_ID;
