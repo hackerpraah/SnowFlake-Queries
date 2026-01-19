@@ -1,0 +1,74 @@
+WITH public_instances AS (
+  SELECT
+    DISTINCT resource_id
+  FROM
+    cloud_configuration_v
+  WHERE
+    resource_type ILIKE '%ec2%instance%'
+    AND (
+      GET_PATH (
+        resource_config,
+        'SecurityGroups.IpPermissions.IpRanges.CidrIp'
+      ) LIKE '%0.0.0.0/0%'
+      OR GET_PATH (
+        resource_config,
+        'SecurityGroups.IpPermissions.Ipv6Ranges.CidrIpv6'
+      ) LIKE '%::/0%'
+    )
+),
+instance_roles AS (
+  SELECT
+    cr.resource_id,
+    cr.account_id,
+    cr.resource_region,
+    GET_PATH (cc.resource_config, 'IamInstanceProfile.Arn') AS instance_profile_arn,
+    GET_PATH (cc.resource_config, 'IamInstanceProfile.Id') AS instance_profile_id,
+    GET_PATH (cc.resource_config, 'AttachedPolicies') AS attached_policies
+  FROM
+    cloud_resources_v AS cr
+    JOIN cloud_configuration_v AS cc ON cr.resource_id = cc.resource_id
+    JOIN public_instances AS pi ON cr.resource_id = pi.resource_id
+  WHERE
+    cr.resource_type ILIKE '%ec2%instance%'
+),
+risky_permissions AS (
+  SELECT
+    ir.resource_id,
+    ir.account_id,
+    ir.resource_region,
+    ir.instance_profile_arn,
+    ARRAY_AGG (
+      DISTINCT CASE
+        WHEN GET_PATH (p.value, 'PolicyDocument.Statement.Effect') = 'Allow'
+        AND (
+          GET_PATH (p.value, 'PolicyDocument.Statement.Action') LIKE '%*%'
+          OR GET_PATH (p.value, 'PolicyDocument.Statement.Resource') LIKE '%*%'
+        ) THEN 'Wildcard Permissions (*)'
+        WHEN GET_PATH (p.value, 'PolicyDocument.Statement.Effect') = 'Allow'
+        AND GET_PATH (p.value, 'PolicyDocument.Statement.Action') LIKE '%admin%' THEN 'Administrative Access'
+      END
+    ) AS risk_findings
+  FROM
+    instance_roles AS ir,
+    LATERAL FLATTEN (input => ir.attached_policies) AS p (SEQ, KEY, PATH, INDEX, VALUE, THIS)
+  WHERE
+    NOT GET_PATH (p.value, 'PolicyDocument.Statement') IS NULL
+  GROUP BY
+    1,
+    2,
+    3,
+    4
+)
+SELECT
+  resource_id,
+  account_id,
+  resource_region,
+  instance_profile_arn,
+  ARRAY_TO_STRING (risk_findings, ', ') AS risky_permissions
+FROM
+  risky_permissions
+WHERE
+  NOT risk_findings IS NULL
+ORDER BY
+  account_id,
+  resource_region;
