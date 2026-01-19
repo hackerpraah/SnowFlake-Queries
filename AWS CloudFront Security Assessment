@@ -1,0 +1,145 @@
+WITH base AS (
+  SELECT
+    config.*
+  FROM CLOUD_CONFIGURATION_V AS config
+  WHERE
+    config.CSP ILIKE '%aws%'
+    AND config.RESOURCE_TYPE ILIKE '%cloudfront%'
+    AND config.START_TIME > DATEADD(HOUR, -24, CURRENT_TIMESTAMP)
+),
+
+/* One row per origin */
+flattened_origins AS (
+  SELECT DISTINCT
+    b.*,
+    o.value AS origin,
+    o.index AS origin_index
+  FROM base AS b,
+       LATERAL FLATTEN(
+         input => PARSE_JSON(GET_PATH(b.RESOURCE_CONFIG, 'Origins.Items'))
+       ) AS o
+),
+
+/* One row per cache behavior (DEFAULT + CacheBehaviors.Items) */
+flattened_behaviors AS (
+  SELECT DISTINCT
+    b.*,
+    cb.value AS cache_behavior,
+    cb.index AS cache_behavior_index
+  FROM base AS b,
+       LATERAL FLATTEN(
+         input => ARRAY_CAT(
+           ARRAY_CONSTRUCT(PARSE_JSON(GET_PATH(b.RESOURCE_CONFIG, 'DefaultCacheBehavior'))),
+           COALESCE(
+             CAST(PARSE_JSON(GET_PATH(b.RESOURCE_CONFIG, 'CacheBehaviors.Items')) AS ARRAY),
+             ARRAY_CONSTRUCT()
+           )
+         )
+       ) AS cb
+)
+
+SELECT DISTINCT
+  /* Account and distribution identity */
+  CAST(GET_PATH(o.CLOUD_DETAILS, 'accountID') AS TEXT)        AS AWS_ACCOUNT_ID,
+  CAST(GET_PATH(o.CLOUD_DETAILS, 'accountAlias') AS TEXT)     AS AWS_ACCOUNT_ALIAS,
+  CAST(GET_PATH(o.RESOURCE_CONFIG, 'DomainName') AS TEXT)     AS CLOUDFRONT_DOMAIN,
+
+  /* Origin identity */
+  CAST(GET_PATH(o.origin, 'DomainName') AS TEXT)             AS ORIGIN_DOMAIN,
+  CAST(GET_PATH(o.origin, 'Id') AS TEXT)                     AS ORIGIN_ID,
+  CAST(GET_PATH(o.origin, 'OriginPath') AS TEXT)             AS ORIGIN_PATH,
+
+  /* Path behavior identity */
+  b.cache_behavior_index                                     AS CACHE_BEHAVIOR_INDEX,
+  COALESCE(CAST(GET_PATH(b.cache_behavior, 'PathPattern') AS TEXT), 'DEFAULT') AS PATH_PATTERN,
+
+  /* OAC status (origin level) */
+  CASE
+    WHEN COALESCE(CAST(GET_PATH(o.origin, 'OriginAccessControlId') AS TEXT), '') = ''
+      THEN 'Missing Origin Access Control'
+    ELSE 'Configured'
+  END AS OAC_STATUS,
+
+  /* Access logging (distribution level) */
+  CAST(GET_PATH(o.RESOURCE_CONFIG, 'Logging.Enabled') AS BOOLEAN) AS ACCESS_LOGGING_ENABLED,
+
+  /* Origin protocol policy (origin level, custom origins) */
+  CAST(GET_PATH(o.origin, 'CustomOriginConfig.OriginProtocolPolicy') AS TEXT) AS ORIGIN_PROTOCOL_POLICY,
+  CASE
+    WHEN CAST(GET_PATH(o.origin, 'CustomOriginConfig.OriginProtocolPolicy') AS TEXT) = 'http-only'
+      THEN 'Insecure HTTP Only'
+    WHEN CAST(GET_PATH(o.origin, 'CustomOriginConfig.OriginProtocolPolicy') AS TEXT) = 'match-viewer'
+      THEN 'Mixed security: matches viewer'
+    WHEN CAST(GET_PATH(o.origin, 'CustomOriginConfig.OriginProtocolPolicy') AS TEXT) IS NULL
+      THEN 'Not a custom origin or not set'
+    ELSE 'Secure HTTPS usage'
+  END AS ORIGIN_PROTOCOL_SECURITY,
+
+  /* Origin SSL protocols (origin level, custom origins) */
+  GET_PATH(o.origin, 'CustomOriginConfig.OriginSslProtocols.Items') AS SSL_PROTOCOLS,
+  CASE
+    WHEN ARRAY_CONTAINS('SSLv3'::VARIANT, GET_PATH(o.origin, 'CustomOriginConfig.OriginSslProtocols.Items'))
+      OR ARRAY_CONTAINS('TLSv1'::VARIANT,  GET_PATH(o.origin, 'CustomOriginConfig.OriginSslProtocols.Items'))
+      OR ARRAY_CONTAINS('TLSv1.1'::VARIANT,GET_PATH(o.origin, 'CustomOriginConfig.OriginSslProtocols.Items'))
+      THEN 'Allows insecure SSL protocols (< TLS 1.2)'
+    WHEN GET_PATH(o.origin, 'CustomOriginConfig.OriginSslProtocols.Items') IS NULL
+      THEN 'Not a custom origin or not set'
+    ELSE 'Modern protocols only (TLS 1.2+)'
+  END AS SSL_PROTOCOL_SECURITY,
+
+  /* Viewer protocol policy (per behavior) */
+  CAST(GET_PATH(b.cache_behavior, 'ViewerProtocolPolicy') AS TEXT) AS VIEWER_PROTOCOL_POLICY,
+  CASE
+    WHEN CAST(GET_PATH(b.cache_behavior, 'ViewerProtocolPolicy') AS TEXT) = 'allow-all'
+      THEN 'Viewer allows HTTP and HTTPS'
+    WHEN CAST(GET_PATH(b.cache_behavior, 'ViewerProtocolPolicy') AS TEXT) = 'http-only'
+      THEN 'Viewer HTTP only'
+    ELSE 'Viewer HTTPS enforced'
+  END AS VIEWER_CONNECTION_POLICY_STATUS,
+
+  /* Signed URLs / cookies access control (per behavior) */
+  CASE
+    WHEN GET_PATH(b.cache_behavior, 'TrustedSigners.Enabled') = FALSE
+     AND GET_PATH(b.cache_behavior, 'TrustedKeyGroups.Enabled') = FALSE
+      THEN 'No signed URLs or signed cookies'
+    ELSE 'Signed URLs or key groups enabled'
+  END AS CDN_ACCESS_CONTROL_STATUS,
+
+  /* Response headers policy (per behavior) as CSP heuristic */
+  CAST(GET_PATH(b.cache_behavior, 'ResponseHeadersPolicyId') AS TEXT) AS RESPONSE_HEADERS_POLICY_ID,
+  CASE
+    WHEN GET_PATH(b.cache_behavior, 'ResponseHeadersPolicyId') IS NULL
+      THEN 'No response headers policy (CSP may be missing or only at origin)'
+    ELSE 'Response headers policy configured (CSP possible)'
+  END AS CSP_LIKELY_STATUS,
+
+  /* Query string forwarding (per behavior) */
+  CAST(GET_PATH(b.cache_behavior, 'ForwardedValues.QueryString') AS BOOLEAN) AS FORWARDS_QUERYSTRING,
+  CASE
+    WHEN COALESCE(CAST(GET_PATH(b.cache_behavior, 'ForwardedValues.QueryString') AS BOOLEAN), FALSE) = TRUE
+      THEN 'Forwards query string'
+    ELSE 'Does not forward query string'
+  END AS QUERYSTRING_FORWARDING_STATUS,
+
+  /* Cookie forwarding (per behavior) */
+  CAST(GET_PATH(b.cache_behavior, 'ForwardedValues.Cookies.Forward') AS TEXT) AS COOKIE_FORWARDING,
+  CASE
+    WHEN CAST(GET_PATH(b.cache_behavior, 'ForwardedValues.Cookies.Forward') AS TEXT) = 'all'
+      THEN 'Forwards all cookies'
+    ELSE 'Restricted cookie forwarding'
+  END AS COOKIE_FORWARDING_STATUS,
+
+  o.START_TIME
+FROM
+  flattened_origins AS o
+  JOIN flattened_behaviors AS b
+    ON CAST(GET_PATH(b.CLOUD_DETAILS, 'accountID') AS TEXT) = CAST(GET_PATH(o.CLOUD_DETAILS, 'accountID') AS TEXT)
+   AND CAST(GET_PATH(b.RESOURCE_CONFIG, 'DomainName') AS TEXT) = CAST(GET_PATH(o.RESOURCE_CONFIG, 'DomainName') AS TEXT)
+WHERE
+  o.CSP ILIKE '%aws%'
+  AND o.RESOURCE_TYPE ILIKE '%cloudfront%'
+ORDER BY
+  AWS_ACCOUNT_ID,
+  CLOUDFRONT_DOMAIN,
+  CACHE_BEHAVIOR_INDEX,
+  ORIGIN_ID;
