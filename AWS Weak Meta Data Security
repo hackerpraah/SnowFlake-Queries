@@ -1,0 +1,67 @@
+WITH metadata_findings AS (
+  SELECT
+    cr.resource_id,
+    cr.account_id,
+    cr.resource_region,
+    GET_PATH (cc.resource_config, 'VpcId') AS vpc_id,
+    CASE
+      WHEN NOT GET_PATH (cr.resource_config, 'PublicIpAddress') IS NULL THEN 'Public'
+      ELSE 'Private'
+    END AS internet_facing,
+    ARRAY_AGG (
+      DISTINCT CASE
+        WHEN GET_PATH (cc.resource_config, 'MetadataOptions.HttpTokens') = 'optional' THEN 'IMDSv1 Enabled (SSRF Vulnerable)'
+      END
+    ) AS security_findings,
+    MAX(
+      CAST(
+        GET_PATH (
+          cc.resource_config,
+          'MetadataOptions.HttpPutResponseHopLimit'
+        ) AS INT
+      )
+    ) AS max_hop_limit,
+    MAX(
+      CAST(
+        GET_PATH (cc.resource_config, 'MetadataOptions.HttpTokens') AS VARCHAR
+      )
+    ) AS metadata_auth,
+    MAX(
+      CAST(
+        GET_PATH (
+          cc.resource_config,
+          'MetadataOptions.HttpEndpoint'
+        ) AS VARCHAR
+      )
+    ) AS metadata_endpoint
+  FROM
+    cloud_resources_v AS cr
+    JOIN cloud_configuration_v AS cc ON cr.resource_id = cc.resource_id
+  WHERE
+    cr.resource_type ILIKE '%ec2%instance%'
+    AND cr.start_time > DATEADD (HOUR, -24, CURRENT_DATE)
+    AND GET_PATH (cc.resource_config, 'State.Name') = 'running'
+  GROUP BY
+    cr.resource_id,
+    cr.account_id,
+    cr.resource_region,
+    vpc_id,
+    internet_facing
+)
+SELECT
+  resource_id,
+  account_id,
+  resource_region,
+  vpc_id,
+  internet_facing,
+  metadata_auth,
+  metadata_endpoint,
+  max_hop_limit,
+  ARRAY_TO_STRING (security_findings, ', ') AS security_findings
+FROM
+  metadata_findings
+WHERE
+  ARRAY_SIZE (security_findings) > 0
+ORDER BY
+  account_id,
+  resource_region;
