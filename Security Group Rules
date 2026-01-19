@@ -1,0 +1,6 @@
+select DISTINCT RESOURCE_ID, RESOURCE_CONFIG:GroupName::String as SG_NAME, RESOURCE_CONFIG:VpcId::String as VPC, RESOURCE_REGION, ACCOUNT_ALIAS as Account, ACCOUNT_ID, RESOURCE_CONFIG:IpPermissions from LW_CORPORATE.DATA_SHARE.CLOUD_RESOURCES_V
+where  
+RESOURCE_TYPE = 'ec2:security-group' and 
+RESOURCE_CONFIG:GroupName::String ilike '	
+sg-035375c0777c24943' and
+"START_TIME" > dateadd(day, -7, current_date())
