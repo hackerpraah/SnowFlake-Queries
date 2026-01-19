@@ -1,0 +1,62 @@
+WITH lb_ports AS (
+  SELECT
+    DISTINCT cr.account_alias,
+    cc.resource_id,
+    cc.resource_type,
+    cc.resource_region,
+    CAST(
+      GET_PATH (
+        PARSE_JSON (cc.resource_config),
+        'ListenerDescriptions[0].Listener.Protocol'
+      ) AS TEXT
+    ) AS protocol,
+    CAST(
+      GET_PATH (
+        PARSE_JSON (cc.resource_config),
+        'ListenerDescriptions[0].Listener.LoadBalancerPort'
+      ) AS DECIMAL(38, 0)
+    ) AS port,
+    CAST(
+      GET_PATH (PARSE_JSON (cc.resource_config), 'Scheme') AS TEXT
+    ) AS LB_Exposure,
+    CAST(
+      GET_PATH (PARSE_JSON (cc.resource_config), 'DNSName') AS TEXT
+    ) AS DNS_Name,
+    CAST(
+      GET_PATH (PARSE_JSON (cc.resource_config), 'PublicIp') AS TEXT
+    ) AS Public_IP,
+    COALESCE(
+      CAST(
+        GET_PATH (PARSE_JSON (cc.resource_config), 'VPCId') AS TEXT
+      ),
+      CAST(
+        GET_PATH (PARSE_JSON (cc.resource_config), 'VpcId') AS TEXT
+      )
+    ) AS vpc_id,
+  FROM
+    cloud_configuration_v AS cc
+    LEFT JOIN cloud_resources_v AS cr ON cc.resource_id = cr.resource_id
+  WHERE
+    LOWER(cc.resource_type) ILIKE ANY ('%elb%', '%load%')
+    AND cc.start_time > DATEADD (HOUR, -24, CURRENT_DATE)
+    AND LOWER(cc.csp) ILIKE '%aws%'
+    AND NOT cc.resource_config IS NULL
+)
+SELECT
+  *
+FROM
+  lb_ports AS l
+WHERE
+  NOT EXISTS (
+    SELECT
+      1
+    FROM
+      lb_ports AS p
+    WHERE
+      p.resource_id = l.resource_id
+      AND p.port IN (80, 443)
+  )
+  AND NOT l.port IS NULL
+  AND NOT l.vpc_id IS NULL
+ORDER BY
+  resource_id;
