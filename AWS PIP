@@ -1,0 +1,93 @@
+SELECT
+  DISTINCT cloud_resources_v.resource_id,
+  cloud_resources_v.resource_region,
+  cloud_resources_v.resource_type,
+  cloud_resources_v.account_id,
+  cloud_resources_v.account_alias,
+  CAST(
+    GET_PATH (cloud_resources_v.resource_tags, 'Cluster') AS VARCHAR
+  ) AS cluster,
+  CAST(
+    GET_PATH (cloud_resources_v.resource_tags, 'Environment') AS VARCHAR
+  ) AS environment,
+  CAST(
+    GET_PATH (cloud_resources_v.resource_tags, 'ExpireTime') AS VARCHAR
+  ) AS expire_time,
+  CAST(
+    GET_PATH (cloud_resources_v.resource_tags, 'LaunchReason') AS VARCHAR
+  ) AS launch_reason,
+  CAST(
+    GET_PATH (cloud_resources_v.resource_tags, 'Module') AS VARCHAR
+  ) AS module,
+  CAST(
+    GET_PATH (cloud_resources_v.resource_tags, 'Name') AS VARCHAR
+  ) AS name,
+  CAST(
+    GET_PATH (cloud_resources_v.resource_tags, 'PreSetup') AS VARCHAR
+  ) AS pre_setup,
+  CAST(
+    GET_PATH (cloud_resources_v.resource_tags, 'ServerGroup') AS VARCHAR
+  ) AS server_group,
+  CAST(
+    GET_PATH (cloud_resources_v.resource_tags, 'Service') AS VARCHAR
+  ) AS service_tag,
+  CAST(
+    GET_PATH (cloud_resources_v.resource_tags, 'Ticket') AS VARCHAR
+  ) AS ticket,
+  CAST(
+    GET_PATH (
+      cloud_resources_v.resource_config,
+      'PublicIpAddress'
+    ) AS VARCHAR
+  ) AS public_ip,
+  CAST(
+    GET_PATH (
+      cloud_resources_v.resource_config,
+      'PrivateIpAddress'
+    ) AS VARCHAR
+  ) AS private_ip,
+  CAST(
+    GET_PATH (
+      cloud_resources_v.resource_config,
+      'Placement.AvailabilityZone'
+    ) AS VARCHAR
+  ) AS az,
+  CAST(
+    GET_PATH (
+      cloud_resources_v.resource_config,
+      'Placement.GroupName'
+    ) AS VARCHAR
+  ) AS placement_group,
+  CAST(
+    GET_PATH (
+      cloud_resources_v.resource_config,
+      'Placement.Tenancy'
+    ) AS VARCHAR
+  ) AS tenancy,
+  CAST(
+    GET_PATH (
+      cloud_resources_v.resource_config,
+      'InstanceType'
+    ) AS VARCHAR
+  ) AS instance_type,
+  CAST(
+    GET_PATH (cloud_resources_v.resource_config, 'SubnetId') AS VARCHAR
+  ) AS subnet_id,
+  CAST(
+    GET_PATH (cloud_resources_v.resource_config, 'VpcId') AS VARCHAR
+  ) AS vpc_id,
+  cloud_resources_v.start_time
+FROM
+  cloud_resources_v
+WHERE
+  cloud_resources_v.resource_type ILIKE '%instance%'
+  AND cloud_resources_v.service ILIKE '%ec2%'
+  AND GET_PATH (RESOURCE_CONFIG, 'State.Name') = 'running'
+  AND NOT GET_PATH (
+    cloud_resources_v.resource_config,
+    'PublicIpAddress'
+  ) IS NULL
+  AND start_time BETWEEN DATEADD (DAY, -1, CURRENT_DATE)
+  AND DATEADD (DAY, -0, CURRENT_DATE)
+ORDER BY
+  cloud_resources_v.start_time DESC;
