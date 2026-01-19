@@ -1,0 +1,35 @@
+WITH ebs_encryption AS (
+  SELECT
+    resource_type,
+    resource_id,
+    resource_region,
+    CAST(
+      GET_PATH (resource_config, 'encrypted') AS BOOLEAN
+    ) AS is_encrypted,
+    start_time
+  FROM
+    cloud_configuration_v
+  WHERE
+    csp ILIKE '%aws%'
+    AND resource_type ILIKE '%ebs%'
+    //AND end_time IS NULL
+)
+SELECT
+  resource_type,
+  resource_region,
+  is_encrypted,
+  COUNT(*) AS resource_count,
+  LISTAGG (resource_id, ', ') WITHIN GROUP (
+    ORDER BY
+      resource_id
+  ) AS resource_ids
+FROM
+  ebs_encryption
+GROUP BY
+  resource_type,
+  resource_region,
+  is_encrypted
+ORDER BY
+  resource_type,
+  resource_region,
+  is_encrypted;
