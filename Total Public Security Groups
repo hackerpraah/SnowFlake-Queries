@@ -1,0 +1,18 @@
+SELECT
+  resource_type,
+  CAST(GET_PATH (cloud_details, 'accountName') AS TEXT) AS "Account Name",
+  //CAST(GET_PATH (cloud_details, 'accountAlias') AS TEXT) AS "Account Alias",
+  COUNT(DISTINCT resource_id) AS count
+FROM
+  cloud_configuration_v,
+  LATERAL FLATTEN (
+    input => GET_PATH (resource_config, 'IpPermissions')
+  ) AS ip_perms (SEQ, KEY, PATH, INDEX, VALUE, THIS),
+  LATERAL FLATTEN (input => GET_PATH (ip_perms.value, 'IpRanges')) AS ip_ranges (SEQ, KEY, PATH, INDEX, VALUE, THIS)
+WHERE
+  resource_type ILIKE '%ec2:security-group%'
+  AND GET_PATH (ip_ranges.value, 'CidrIp') = '0.0.0.0/0'
+  AND start_time > DATEADD (DAY, -0.5, CURRENT_DATE)
+GROUP BY
+  resource_type,
+  CAST(GET_PATH (cloud_details, 'accountName') AS TEXT);
