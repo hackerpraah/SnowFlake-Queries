@@ -1,0 +1,35 @@
+SELECT
+  RESOURCE_ID,
+  RESOURCE_REGION AS VPC_Region,
+  CAST(GET_PATH (CLOUD_DETAILS, 'accountAlias') AS TEXT) AS Account_Name,
+  CAST(GET_PATH (RESOURCE_CONFIG, 'VpcId') AS TEXT) AS VPC_ID,
+  CAST(GET_PATH (RESOURCE_TAGS, 'Name') AS TEXT) AS Name,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'PrivateIpAddress') AS TEXT
+  ) AS Private_IP,
+  CAST(
+    GET_PATH (RESOURCE_CONFIG, 'PublicIpAddress') AS TEXT
+  ) AS PIP,
+  CAST(GET_PATH (RESOURCE_TAGS, 'Service') AS TEXT) AS Service,
+  CAST(GET_PATH (value, 'GroupId') AS TEXT) AS SG_ID,
+  CAST(GET_PATH (value, 'GroupName') AS TEXT) AS SG_NAME,
+  CAST(GET_PATH (RESOURCE_CONFIG, 'IamInstanceProfile') AS TEXT) AS IAM_Auth_Enabled,
+  CAST(GET_PATH (RESOURCE_CONFIG, 'EbsOptimized') AS TEXT) AS EBS_Encryption_Enabled,
+  RESOURCE_CONFIG,
+  RESOURCE_TAGS
+FROM
+  LW_CORPORATE.DATA_SHARE.CLOUD_CONFIGURATION_V,
+  LATERAL FLATTEN (GET_PATH (RESOURCE_CONFIG, 'SecurityGroups')) AS _flattened (SEQ, KEY, PATH, INDEX, VALUE, THIS)
+WHERE
+  RESOURCE_TYPE LIKE ANY ('ec2:instance')
+  AND GET_PATH (RESOURCE_CONFIG, 'State.Name') = 'running'
+  //AND GET_PATH (RESOURCE_TAGS, 'Service') <> 'kubernetes'
+  AND GET_PATH (RESOURCE_TAGS, 'Service') IN (
+    'mongo',
+    'elasticsearch',
+    'scylladb',
+    'cassandra',
+    'influxdb',
+    'hdfs'
+  )
+  AND START_TIME > DATEADD (HOUR, -24, CURRENT_DATE);
